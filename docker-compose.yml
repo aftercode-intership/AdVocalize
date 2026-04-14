@@ -1,0 +1,493 @@
+services:
+  # ============================================================================
+  # CORE INFRASTRUCTURE
+  # ============================================================================
+
+  # PostgreSQL Database with pgvector extension
+  postgres:
+    image: postgres:16-alpine
+    container_name: vocalize-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-vocalize}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-localpassword}
+      POSTGRES_DB: ${DB_NAME:-vocalize_db}
+      # pgvector extension will be created automatically via SQL init
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/sql:/docker-entrypoint-initdb.d
+    networks:
+      - vocalize-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-vocalize}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    labels:
+      logging: "promtail"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis Cache & Queue
+  redis:
+    image: redis:7-alpine
+    container_name: vocalize-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_password}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - vocalize-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    labels:
+      logging: "promtail"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # MinIO (S3-compatible storage)
+  minio:
+    image: minio/minio:latest
+    container_name: vocalize-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"    # API
+      - "9001:9001"    # Console
+    volumes:
+      - minio_data:/data
+    networks:
+      - vocalize-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.minio.rule: "Host(`minio.localhost`)"
+      traefik.http.services.minio.loadbalancer.server.port: "9001"
+      logging: "promtail"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # OBSERVABILITY & LOGGING
+  # ============================================================================
+
+  # Loki (Log Aggregation)
+  loki:
+    image: grafana/loki:latest
+    container_name: vocalize-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./infra/loki-config.yml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    networks:
+      - vocalize-network
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.loki.rule: "Host(`loki.localhost`)"
+      traefik.http.services.loki.loadbalancer.server.port: "3100"
+      logging: "promtail"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Promtail (Log Shipping to Loki)
+  promtail:
+    image: grafana/promtail:latest
+    container_name: vocalize-promtail
+    volumes:
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./infra/promtail-config.yml:/etc/promtail/config.yml
+    networks:
+      - vocalize-network
+    command: -config.file=/etc/promtail/config.yml
+    restart: unless-stopped
+    labels:
+      logging: "promtail"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Prometheus (Metrics Collection)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: vocalize-prometheus
+    volumes:
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    networks:
+      - vocalize-network
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.prometheus.rule: "Host(`prometheus.localhost`) || PathPrefix(`/prometheus`)"
+      traefik.http.services.prometheus.loadbalancer.server.port: "9090"
+      logging: "promtail"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Grafana (Visualization & Dashboards)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: vocalize-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_INSTALL_PLUGINS: 'grafana-piechart-panel'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./infra/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+    ports:
+      - "3001:3000"
+    networks:
+      - vocalize-network
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.grafana.rule: "Host(`grafana.localhost`)"
+      traefik.http.services.grafana.loadbalancer.server.port: "3000"
+      logging: "promtail"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # API GATEWAY & REVERSE PROXY
+  # ============================================================================
+
+  # Traefik (API Gateway & Reverse Proxy)
+  traefik:
+    image: traefik:v2.10
+    container_name: vocalize-traefik
+    command:
+      - "--api.insecure=true"
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=vocalize-network"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--log.level=INFO"
+      - "--accesslog=true"
+      - "--accesslog.filepath=/var/log/traefik/access.log"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Dashboard at http://traefik.localhost:8080
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - traefik_data:/var/lib/traefik
+      - ./infra/traefik:/traefik:ro
+    networks:
+      - vocalize-network
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.dashboard.rule: "Host(`traefik.localhost`) || PathPrefix(`/dashboard`) || PathPrefix(`/api`)"
+      traefik.http.routers.dashboard.service: "api@internal"
+      logging: "promtail"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # APPLICATION SERVICES (PLACEHOLDER - ADD LATER)
+  # ============================================================================
+  
+# Backend API Service (Go/Fibre)
+  # Uncomment and configure when ready to add backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vocalize-api
+    environment:
+      PORT: ${API_PORT:-8081}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-vocalize}
+      DB_PASSWORD: ${DB_PASSWORD:-localpassword}
+      DB_NAME: ${DB_NAME:-vocalize_db}
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: minio:9000
+      ENVIRONMENT: development
+      LOG_LEVEL: debug
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./backend:/app
+    networks:
+      - vocalize-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.api.rule: "Host(`api.localhost`) || Host(`localhost`) && PathPrefix(`/api`)"
+      traefik.http.services.api.loadbalancer.server.port: "8081"
+      logging: "promtail"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Frontend (Next.js)
+  # Uncomment and configure when ready to add frontend
+  frontend:
+     build:
+       context: ./frontend
+       dockerfile: Dockerfile
+       args:
+         NEXT_PUBLIC_API_URL: http://localhost:8081
+     container_name: vocalize-frontend
+     environment:
+       NEXT_PUBLIC_API_URL: http://localhost:8081
+       NODE_ENV: development
+     ports:
+       - "3000:3000"
+     volumes:
+       - ./frontend:/app
+     networks:
+       - vocalize-network
+     depends_on:
+       - backend
+     restart: unless-stopped
+     labels:
+       traefik.enable: "true"
+       traefik.http.routers.frontend.rule: "Host(`localhost`) || Host(`app.localhost`)"
+       traefik.http.services.frontend.loadbalancer.server.port: "3000"
+       logging: "promtail"
+     logging:
+       driver: "json-file"
+       options:
+         max-size: "10m"
+         max-file: "3"
+
+
+ # Script Generation Service (Python/FastAPI)
+  # Uncomment and configure when ready
+  script-gen:
+    build:
+      context: ./services/script-gen
+      dockerfile: Dockerfile
+      # Cache build layers — only rebuilds if requirements.txt or code changes
+      cache_from:
+        - vocalize-script-gen:latest
+    image: vocalize-script-gen:latest
+    container_name: vocalize-script-gen
+    environment:
+      # GLM API key from your .env file
+      GLM_API_KEY: ${GLM_API_KEY}
+      # ✅ FIXED: model name matches ZhipuAI API (was glm-flash-4.7 in config.py)
+      GLM_MODEL: ${GLM_MODEL:-glm-4-flash}
+      GLM_BASE_URL: ${GLM_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
+      # Redis for caching generated scripts (avoids re-generating the same input)
+      REDIS_URL: redis://redis:6379
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      PORT: 8001
+    ports:
+      - "8001:8001"
+    networks:
+      - vocalize-network
+    depends_on:
+      redis:
+        condition: service_healthy      # Wait until Redis is actually ready
+      postgres:
+        condition: service_healthy      # Wait until DB is ready (for future DB writes)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      # start_period is long because the HuggingFace model download can take ~2 min
+      # on first run (subsequent runs use Docker volume cache)
+      start_period: 120s
+      retries: 3
+    # Volume to cache the HuggingFace model weights between restarts
+    # Without this, the model re-downloads every time the container restarts
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+      - camel_data:/root/camel_tools
+    restart: unless-stopped
+    labels:
+      logging: "promtail"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # TTS Service (Python/FastAPI)
+  # Uncomment and configure when ready
+  # tts:
+  #   build:
+  #     context: ./services/tts
+  #     dockerfile: Dockerfile
+  #   container_name: vocalize-tts
+  #   environment:
+  #     PORT: 8002
+  #     REDIS_URL: redis://redis:6379
+  #     MINIO_ENDPOINT: minio:9000
+  #     LOG_LEVEL: debug
+  #   ports:
+  #     - "8002:8002"
+  #   volumes:
+  #     - ./services/tts:/app
+  #   networks:
+  #     - vocalize-network
+  #   depends_on:
+  #     - redis
+  #     - minio
+  #   restart: unless-stopped
+  #   labels:
+  #     logging: "promtail"
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+
+  # Voice Clone Service (Python/FastAPI)
+  # Uncomment and configure when ready
+  # voice-clone:
+  #   build:
+  #     context: ./services/voice-clone
+  #     dockerfile: Dockerfile
+  #   container_name: vocalize-voice-clone
+  #   environment:
+  #     PORT: 8003
+  #     REDIS_URL: redis://redis:6379
+  #     MINIO_ENDPOINT: minio:9000
+  #     LOG_LEVEL: debug
+  #   ports:
+  #     - "8003:8003"
+  #   volumes:
+  #     - ./services/voice-clone:/app
+  #   networks:
+  #     - vocalize-network
+  #   depends_on:
+  #     - redis
+  #     - minio
+  #   restart: unless-stopped
+  #   labels:
+  #     logging: "promtail"
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+
+  # Video Generation Service (Python/FastAPI)
+  # Uncomment and configure when ready
+  # video-gen:
+  #   build:
+  #     context: ./services/video-gen
+  #     dockerfile: Dockerfile
+  #   container_name: vocalize-video-gen
+  #   environment:
+  #     PORT: 8004
+  #     REDIS_URL: redis://redis:6379
+  #     MINIO_ENDPOINT: minio:9000
+  #     LOG_LEVEL: debug
+  #   ports:
+  #     - "8004:8004"
+  #   volumes:
+  #     - ./services/video-gen:/app
+  #   networks:
+  #     - vocalize-network
+  #   depends_on:
+  #     - redis
+  #     - minio
+  #   restart: unless-stopped
+  #   labels:
+  #     logging: "promtail"
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+
+networks:
+  vocalize-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  loki_data:
+    driver: local
+  traefik_data:
+    driver: local
+  hf_cache:      
+    driver: local
+  camel_data:    
+    driver: local

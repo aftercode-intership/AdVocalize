@@ -1,0 +1,40 @@
+# services/script-gen/requirements-dev.txt
+# ─────────────────────────────────────────────────────────────────────────────
+# LOCAL WINDOWS DEVELOPMENT — Python 3.14 compatible, no C++ build required.
+#
+# Usage:
+#   pip install -r requirements-dev.txt
+#
+# This omits camel-tools and uses the HuggingFace-only diacritization path.
+# Everything else (FastAPI, GLM calls, Redis, script generation) works
+# identically to production.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Web framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# HTTP client (calls GLM API)
+httpx==0.27.2
+
+# Data validation
+pydantic==2.9.2
+
+# Caching (optional locally — service falls back gracefully if Redis is down)
+redis==5.2.0
+
+# Environment variables
+python-dotenv==1.0.1
+
+# ── AI / ML (optional locally — service works without these) ───────────────
+# Comment these out if you just want to run the API without Arabic diacritization
+# transformers==4.40.2
+# torch==2.1.0
+
+# NOTE: camel-tools is intentionally EXCLUDED here.
+# It requires Microsoft C++ Build Tools + CMake on Windows.
+# The diacritizer gracefully skips it and uses rule-based fallback.
+
+# ── Testing ────────────────────────────────────────────────────────────────
+pytest==8.3.3
+pytest-asyncio==0.24.0

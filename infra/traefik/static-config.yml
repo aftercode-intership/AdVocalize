@@ -1,0 +1,30 @@
+api:
+  dashboard: true
+  insecure: true
+
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: vocalize-network
+  file:
+    directory: /traefik
+    watch: true
+
+log:
+  level: INFO
+  format: common
+
+accessLog:
+  format: common
+  fields:
+    defaultMode: keep
+    headers:
+      defaultMode: keep
+

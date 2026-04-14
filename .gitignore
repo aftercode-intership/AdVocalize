@@ -1,0 +1,11 @@
+.env.example
+.env.local
+
+backend/.env.local
+frontend/.env.local
+frontend/.next/
+services/script-gen/.venv/
+
+services/script-gen/.env
+.env
+ 
