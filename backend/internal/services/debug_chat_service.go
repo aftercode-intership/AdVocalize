@@ -2,9 +2,10 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Add this function to your ChatService to help debug
@@ -17,7 +18,7 @@ func (cs *ChatService) DebugCreateSession(ctx context.Context, userID, topic str
 		RETURNING id, user_id, topic, status, created_at, updated_at
 	`
 
-	sessionID := fmt.Sprintf("session_%d", time.Now().Unix())
+	sessionID := uuid.New().String()
 
 	log.Printf("[DEBUG] Executing query: %s", query)
 	log.Printf("[DEBUG] With params: id=%s, user_id=%s, topic=%s", sessionID, userID, topic)

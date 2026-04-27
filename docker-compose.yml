@@ -38,8 +38,7 @@ services:
     image: redis:7-alpine
     container_name: vocalize-redis
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_password}
-    ports:
-      - "6379:6379"
+
     volumes:
       - redis_data:/data
     networks:
@@ -243,85 +242,82 @@ services:
   # APPLICATION SERVICES (PLACEHOLDER - ADD LATER)
   # ============================================================================
   
-# Backend API Service (Go/Fibre)
-  # Uncomment and configure when ready to add backend
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: vocalize-api
-    environment:
-      PORT: ${API_PORT:-8081}
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_USER: ${DB_USER:-vocalize}
-      DB_PASSWORD: ${DB_PASSWORD:-localpassword}
-      DB_NAME: ${DB_NAME:-vocalize_db}
-      REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: minio:9000
-      ENVIRONMENT: development
-      LOG_LEVEL: debug
-    ports:
-      - "8081:8081"
-    volumes:
-      - ./backend:/app
-    networks:
-      - vocalize-network
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    labels:
-      traefik.enable: "true"
-      traefik.http.routers.api.rule: "Host(`api.localhost`) || Host(`localhost`) && PathPrefix(`/api`)"
-      traefik.http.services.api.loadbalancer.server.port: "8081"
-      logging: "promtail"
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+
+  #    context: ./backend
+  #    dockerfile: Dockerfile
+  #  container_name: vocalize-api
+  #  environment:
+  #    PORT: ${API_PORT:-8081}
+  #    DB_HOST: postgres
+  #    DB_PORT: 5432
+  #    DB_USER: ${DB_USER:-vocalize}
+  #    DB_PASSWORD: ${DB_PASSWORD:-localpassword}
+  #    DB_NAME: ${DB_NAME:-vocalize_db}
+  #    REDIS_URL: redis://redis:6379
+  #    MINIO_ENDPOINT: minio:9000
+  #    ENVIRONMENT: development
+  #    LOG_LEVEL: debug
+  #  ports:
+  #    - "8081:8081"
+  #  volumes:
+  #    - ./backend:/app
+  #  networks:
+  #    - vocalize-network
+  #  depends_on:
+  #    postgres:
+  #      condition: service_healthy
+  #    redis:
+  #      condition: service_healthy
+  #    minio:
+  #      condition: service_healthy
+  #  healthcheck:
+  #    test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+  #    interval: 10s
+  #    timeout: 5s
+  #    retries: 5
+  #  restart: unless-stopped
+  #  labels:
+  #    traefik.enable: "true"
+  #    traefik.http.routers.api.rule: "Host(`api.localhost`) || Host(`localhost`) && PathPrefix(`/api`)"
+  #    traefik.http.services.api.loadbalancer.server.port: "8081"
+  #    logging: "promtail"
+  #  logging:
+  #    driver: "json-file"
+  #    options:
+  #      max-size: "10m"
+  #      max-file: "3"
 
 # Frontend (Next.js)
   # Uncomment and configure when ready to add frontend
-  frontend:
-     build:
-       context: ./frontend
-       dockerfile: Dockerfile
-       args:
-         NEXT_PUBLIC_API_URL: http://localhost:8081
-     container_name: vocalize-frontend
-     environment:
-       NEXT_PUBLIC_API_URL: http://localhost:8081
-       NODE_ENV: development
-     ports:
-       - "3000:3000"
-     volumes:
-       - ./frontend:/app
-     networks:
-       - vocalize-network
-     depends_on:
-       - backend
-     restart: unless-stopped
-     labels:
-       traefik.enable: "true"
-       traefik.http.routers.frontend.rule: "Host(`localhost`) || Host(`app.localhost`)"
-       traefik.http.services.frontend.loadbalancer.server.port: "3000"
-       logging: "promtail"
-     logging:
-       driver: "json-file"
-       options:
-         max-size: "10m"
-         max-file: "3"
+  #frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #     args:
+  #       NEXT_PUBLIC_API_URL: http://localhost:8081
+  #   container_name: vocalize-frontend
+  #   environment:
+  #     NEXT_PUBLIC_API_URL: http://localhost:8081
+  #     NODE_ENV: development
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - ./frontend:/app
+  #   networks:
+  #     - vocalize-network
+  #   depends_on:
+  #     - backend
+  #   restart: unless-stopped
+  #   labels:
+  #     traefik.enable: "true"
+  #     traefik.http.routers.frontend.rule: "Host(`localhost`) || Host(`app.localhost`)"
+  #     traefik.http.services.frontend.loadbalancer.server.port: "3000"
+  #     logging: "promtail"
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
 
 
  # Script Generation Service (Python/FastAPI)
@@ -337,12 +333,12 @@ services:
     container_name: vocalize-script-gen
     environment:
       # GLM API key from your .env file
-      GLM_API_KEY: ${GLM_API_KEY}
+      GLM_API_KEY: ${NVIDIA_API_KEY}
       # ✅ FIXED: model name matches ZhipuAI API (was glm-flash-4.7 in config.py)
-      GLM_MODEL: ${GLM_MODEL:-glm-4-flash}
-      GLM_BASE_URL: ${GLM_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
-      # Redis for caching generated scripts (avoids re-generating the same input)
-      REDIS_URL: redis://redis:6379
+      GLM_MODEL: ${GLM_MODEL:-z-ai/glm-5.1}
+      GLM_BASE_URL: ${GLM_BASE_URL:-GLM_BASE_URL=https://integrate.api.nvidia.com/v1/chat/completions}
+# Redis for caching generated scripts (avoids re-generating the same input)
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-info}
       ENVIRONMENT: ${ENVIRONMENT:-development}
@@ -380,33 +376,46 @@ services:
 
   # TTS Service (Python/FastAPI)
   # Uncomment and configure when ready
-  # tts:
-  #   build:
-  #     context: ./services/tts
-  #     dockerfile: Dockerfile
-  #   container_name: vocalize-tts
-  #   environment:
-  #     PORT: 8002
-  #     REDIS_URL: redis://redis:6379
-  #     MINIO_ENDPOINT: minio:9000
-  #     LOG_LEVEL: debug
-  #   ports:
-  #     - "8002:8002"
-  #   volumes:
-  #     - ./services/tts:/app
-  #   networks:
-  #     - vocalize-network
-  #   depends_on:
-  #     - redis
-  #     - minio
-  #   restart: unless-stopped
-  #   labels:
-  #     logging: "promtail"
-  #   logging:
-  #     driver: "json-file"
-  #     options:
-  #       max-size: "10m"
-  #       max-file: "3"
+  tts:
+    build:
+      context: ./services/tts
+      dockerfile: Dockerfile
+    image: vocalize-tts:latest
+    container_name: vocalize-tts
+    environment:
+# Redis for job queue
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379
+      # MinIO for audio storage
+      MINIO_ENDPOINT: minio:9000
+      MINIO_USER: ${MINIO_USER:-minioadmin}
+      MINIO_PASSWORD: ${MINIO_PASSWORD:-minioadmin}
+      MINIO_BUCKET_AUDIO: vocalize-audio
+      MINIO_USE_SSL: "false"
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    networks:
+      - vocalize-network
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Voice Clone Service (Python/FastAPI)
   # Uncomment and configure when ready

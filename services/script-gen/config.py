@@ -10,15 +10,15 @@ class Config:
     GLM_API_KEY: str = os.getenv("GLM_API_KEY", "")
 
     # ✅ FIXED: reads from env first, then falls back to the correct model name.
-    # The previous hardcoded value was "glm-flash-4.7" (wrong order).
-    # ZhipuAI API uses "glm-4-flash" or "glm-4.7-flash" — check your API docs.
-    # Your .env has GLM_MODEL=glm-4.7-flash, so that's what will be used.
-    GLM_MODEL: str = os.getenv("GLM_MODEL", "glm-4-flash")
+    # The previous hardcoded value was "z-ai/glm-5.1" (wrong order).
+    # ZhipuAI API uses "z-ai/glm-5.1" or "z-ai/glm-5.1" — check your API docs.
+    # Your .env has GLM_MODEL=z-ai/glm-5.1, so that's what will be used.
+    GLM_MODEL: str = os.getenv("GLM_MODEL", "z-ai/glm-5.1")
 
     # ✅ FIXED: base URL is now configurable via env
     GLM_BASE_URL: str = os.getenv(
         "GLM_BASE_URL",
-        "https://open.bigmodel.cn/api/paas/v4"
+        "GLM_BASE_URL=https://integrate.api.nvidia.com/v1/chat/completions"
     )
 
     # Full chat completions endpoint (constructed from base URL)

@@ -21,6 +21,7 @@ redis==5.2.0
 # Environment variables
 python-dotenv==1.0.1
 
+numpy<2
 # ── AI / ML ────────────────────────────────────────────────────────────────
 # PyTorch CPU-only build (saves 2GB vs full CUDA build for the script-gen service)
 # If you add GPU support later, remove +cpu and install the CUDA build

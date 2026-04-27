@@ -2,12 +2,14 @@
 package services
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"vocalize/internal/models"
+
+	"github.com/google/uuid"
 )
 
 type MessageEditService struct {
@@ -75,7 +77,7 @@ func (mes *MessageEditService) EditMessage(
 func (mes *MessageEditService) RegenerateResponse(
 	userMessageID string,
 	sessionID string,
-	context *models.ChatContext,
+	chatContext *models.ChatContext,
 	topic string,
 ) (*models.ChatMessage, error) {
 	// Get original user message
@@ -90,9 +92,10 @@ func (mes *MessageEditService) RegenerateResponse(
 
 	// Generate new response
 	newResponse, err := mes.chatService.GenerateContextualResponse(
+		context.Background(),
 		userContent,
 		sessionID,
-		context,
+		chatContext,
 		topic,
 	)
 

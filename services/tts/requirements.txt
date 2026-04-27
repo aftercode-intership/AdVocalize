@@ -1,0 +1,23 @@
+# services/tts/requirements.txt
+# Lightweight — no PyTorch, no GPU dependencies.
+# Works on any CPU, including Docker on Windows/Mac/Linux.
+
+# Web framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# TTS engine — calls Microsoft Edge TTS over HTTPS
+# No API key, no GPU, no C++ compilation required
+edge-tts==7.0.2
+
+# MinIO S3-compatible storage SDK
+minio==7.2.11
+
+# Redis async client (job queue)
+redis==5.2.0
+
+# Environment variables
+python-dotenv==1.0.1
+
+# Data validation
+pydantic==2.8.2

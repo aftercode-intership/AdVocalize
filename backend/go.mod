@@ -10,6 +10,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.12.0
+	github.com/openai/openai/v2 v2.0.0-beta.21
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/sendgrid/sendgrid-go v3.16.1+incompatible

@@ -55,7 +55,7 @@ func (cs *ChatService) CreateSession(
 
 	query := `
     INSERT INTO chat_sessions (id, user_id, campaign_id, topic, status, created_at, updated_at)
-    VALUES ($1, $2, COALESCE(NULLIF($3::text, ''), '')::uuid, $4, $5, $6, $7)
+    VALUES ($1, $2, NULLIF(TRIM($3), '')::uuid, $4, $5, $6, $7)
   `
 
 	_, err := cs.db.Exec(
@@ -77,12 +77,12 @@ func (cs *ChatService) ListSessions(userID string, limit int) ([]models.ChatSess
 	}
 
 	query := `
-		SELECT id, user_id, COALESCE(campaign_id, '') as campaign_id,
+		SELECT id, user_id, COALESCE(campaign_id::text, '') as campaign_id, COALESCE(ad_id::text, '') as ad_id,
 		       topic, status, created_at, updated_at
 		FROM chat_sessions
-		WHERE user_id = $1
-		  AND status != 'archived'
-		ORDER BY updated_at DESC
+		WHERE user_id = $1::uuid
+		  AND (status != 'archived' OR status IS NULL)
+		ORDER BY updated_at DESC NULLS LAST
 		LIMIT $2
 	`
 
@@ -96,7 +96,7 @@ func (cs *ChatService) ListSessions(userID string, limit int) ([]models.ChatSess
 	for rows.Next() {
 		var s models.ChatSession
 		err := rows.Scan(
-			&s.ID, &s.UserID, &s.CampaignID,
+			&s.ID, &s.UserID, &s.CampaignID, &s.AdID,
 			&s.Topic, &s.Status, &s.CreatedAt, &s.UpdatedAt,
 		)
 		if err != nil {
@@ -110,9 +110,10 @@ func (cs *ChatService) ListSessions(userID string, limit int) ([]models.ChatSess
 
 // SaveMessage saves a chat message
 func (cs *ChatService) SaveMessage(message *models.ChatMessage) error {
+	// ── CRITICAL FIX: Use NULLIF to convert empty user_id to NULL for AI messages ──
 	query := `
     INSERT INTO chat_messages (id, session_id, user_id, content, role, is_edited, version, metadata, created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    VALUES ($1, $2, NULLIF(TRIM($3), '')::uuid, $4, $5, $6, $7, $8, $9, $10)
     ON CONFLICT (id) DO UPDATE SET
       is_edited = EXCLUDED.is_edited,
       version = EXCLUDED.version,
@@ -167,6 +168,9 @@ type SendMessageResponse struct {
 
 // text responses from GLM typically arrive in 1-3 seconds.
 func (cs *ChatService) SendMessage(ctx context.Context, req *SendMessageRequest) (*SendMessageResponse, error) {
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("request context cancelled")
+	}
 	now := time.Now()
 
 	// 1. Build the user message, appending attachment descriptions to the content
@@ -198,8 +202,9 @@ func (cs *ChatService) SendMessage(ctx context.Context, req *SendMessageRequest)
 	)
 
 	// 3. Fetch recent message history for context
-	//    We send the last 10 messages so the AI remembers what was discussed
-	history, err := cs.GetSessionHistory(req.SessionID, 10)
+	//    We send the last 5 messages so the AI remembers what was discussed
+	//    (reduced from 10 because NVIDIA times out on very long prompts)
+	history, err := cs.GetSessionHistory(req.SessionID, 5)
 	if err != nil {
 		// Non-fatal: we can still generate a response without history
 		history = []models.ChatMessage{}
@@ -216,7 +221,7 @@ func (cs *ChatService) SendMessage(ctx context.Context, req *SendMessageRequest)
 	aiMsg := &models.ChatMessage{
 		ID:        uuid.New().String(),
 		SessionID: req.SessionID,
-		UserID:    "", // empty = AI / system
+		UserID:    "", // empty = AI / system — saved as NULL via NULLIF in SaveMessage
 		Content:   aiContent,
 		Role:      "ASSISTANT",
 		Version:   1,
@@ -312,6 +317,7 @@ func (cs *ChatService) GetLibraryHistory(userID string, limit int) ([]map[string
 
 // GenerateAIResponse generates AI response via GLM
 func (cs *ChatService) GenerateAIResponse(
+	ctx context.Context,
 	userMessage string,
 	context *models.ChatContext,
 	topic string,
@@ -325,8 +331,8 @@ func (cs *ChatService) GenerateAIResponse(
 	// Build context-aware prompt
 	prompt := cs.buildChatPrompt(userMessage, context, topic)
 
-	// Call GLM
-	response, err := cs.glmService.GenerateResponse(prompt, context.Language)
+	// Call GLM with context
+	response, err := cs.glmService.GenerateResponse(ctx, prompt, context.Language)
 	if err != nil {
 		return "", fmt.Errorf("AI generation failed: %w", err)
 	}
@@ -379,16 +385,16 @@ func (cs *ChatService) GenerateContextualAIResponse(sessionID, userID, userConte
 	}
 
 	// Minimal context from PCM type
-	context := &PromptContext{
+	promptCtx := &PromptContext{
 		Topic:    topic,
 		Language: "en", // default or from user profile
 	}
 
 	// Use PCM to build enriched prompt
-	enrichedPrompt := cs.pcm.BuildEnrichedPrompt(userContent, context, previous)
+	enrichedPrompt := cs.pcm.BuildEnrichedPrompt(userContent, promptCtx, previous)
 
-	// Generate
-	response, err := cs.glmService.GenerateResponse(enrichedPrompt, context.Language)
+	// Generate with background context (WebSocket doesn't have HTTP request context)
+	response, err := cs.glmService.GenerateResponse(context.Background(), enrichedPrompt, promptCtx.Language)
 	if err != nil {
 		return "", err
 	}
@@ -400,10 +406,10 @@ func (cs *ChatService) GenerateContextualAIResponse(sessionID, userID, userConte
 func (cs *ChatService) GetSessionByID(ctx context.Context, sessionID string) (*models.ChatSession, error) {
 	session := &models.ChatSession{}
 	query := `
-		SELECT id, user_id, COALESCE(campaign_id, '') as campaign_id, topic, status, created_at, updated_at
+		SELECT id, user_id, COALESCE(campaign_id::text, '') as campaign_id, COALESCE(ad_id::text, '') as ad_id, topic, status, created_at, updated_at
 		FROM chat_sessions WHERE id = $1
 	`
-	err := cs.db.QueryRowContext(ctx, query, sessionID).Scan(&session.ID, &session.UserID, &session.CampaignID, &session.Topic, &session.Status, &session.CreatedAt, &session.UpdatedAt)
+	err := cs.db.QueryRowContext(ctx, query, sessionID).Scan(&session.ID, &session.UserID, &session.CampaignID, &session.AdID, &session.Topic, &session.Status, &session.CreatedAt, &session.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -454,7 +460,8 @@ func (cs *ChatService) generateWithHistory(
 		language = chatCtx.Language
 	}
 
-	return cs.glmService.GenerateResponse(fullPrompt, language)
+	// Pass context for cancellation support
+	return cs.glmService.GenerateResponse(ctx, fullPrompt, language)
 }
 
 // getSystemRole returns the AI persona description for each topic type.
@@ -551,7 +558,8 @@ Return ONLY the enhanced prompt text. No explanations, no "Here is the enhanced 
 		roughPrompt, language,
 	)
 
-	enhanced, err := cs.glmService.GenerateResponse(metaPrompt, "en")
+	// Pass context so cancellation propagates to GLM
+	enhanced, err := cs.glmService.GenerateResponse(ctx, metaPrompt, "en")
 	if err != nil {
 		return "", fmt.Errorf("prompt enhancement failed: %w", err)
 	}
@@ -655,6 +663,7 @@ func (cs *ChatService) ArchiveSession(sessionID string) error {
 
 // GenerateContextualResponse generates contextual AI response (for message editing)
 func (cs *ChatService) GenerateContextualResponse(
+	ctx context.Context,
 	userContent string,
 	sessionID string,
 	context *models.ChatContext,
@@ -680,7 +689,7 @@ func (cs *ChatService) GenerateContextualResponse(
 		TargetAudience: context.TargetAudience,
 	}
 
-	response, err := cs.glmService.GenerateContextualResponse(userContent, promptCtx, previous)
+	response, err := cs.glmService.GenerateContextualResponse(ctx, userContent, promptCtx, previous)
 	if err != nil {
 		return "", err
 	}

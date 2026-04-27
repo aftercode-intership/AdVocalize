@@ -15,7 +15,7 @@
 #   Application (uncomment as you build each sprint):
 #     backend     → Go/Fiber API              http://localhost:8081
 #     script-gen  → Python script generation  http://localhost:8001  ← NOW ACTIVE
-#     tts         → Python TTS service        http://localhost:8002  (Sprint 5)
+#     tts         → Python TTS service        http://localhost:8000  (Sprint 5)
 #     voice-clone → Python voice cloning      http://localhost:8003  (Sprint 7)
 #     video-gen   → Python video generation   http://localhost:8004  (Sprint 9)
 #     frontend    → Next.js UI                http://localhost:3000  (Sprint 2+)

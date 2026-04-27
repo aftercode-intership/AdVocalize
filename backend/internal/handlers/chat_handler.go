@@ -168,7 +168,8 @@ func (h *ChatHandler) SendMessage(c fiber.Ctx) error {
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	// 90s timeout: allows NVIDIA (25s) + OpenRouter fallback + generation time
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	// Verify user owns session
@@ -265,7 +266,8 @@ func (h *ChatHandler) EnhancePrompt(c fiber.Ctx) error {
 		req.Language = "en"
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// 90s timeout: allows NVIDIA (25s × 3 retries + backoff) + OpenRouter fallback
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	enhanced, err := h.chatService.EnhancePrompt(ctx, req.Prompt, req.Language)
